@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trace Eraser — 学术AI痕迹检测与改写</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧹</text></svg>">
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface2: #232734;
+            --border: #2d3142;
+            --text: #e4e6eb;
+            --text-dim: #9aa0b4;
+            --accent: #6c5ce7;
+            --accent2: #0984e3;
+            --green: #00b894;
+            --yellow: #fdcb6e;
+            --red: #e17055;
+            --orange: #e87700;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        /* ─── Header ─── */
+        header {
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            padding: 48px 24px;
+            text-align: center;
+        }
+        header h1 {
+            font-size: 2.2rem;
+            font-weight: 800;
+            margin-bottom: 8px;
+        }
+        header p {
+            font-size: 1rem;
+            color: rgba(255,255,255,0.85);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .badges {
+            margin-top: 16px;
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .badge {
+            background: rgba(255,255,255,0.15);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: #fff;
+        }
+        /* ─── Main ─── */
+        main {
+            max-width: 960px;
+            margin: -24px auto 0;
+            padding: 0 16px 48px;
+        }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        /* ─── Tabs ─── */
+        .tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 24px;
+        }
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: var(--text-dim);
+            font-size: 1rem;
+            font-weight: 600;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+        }
+        .tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        .tab:hover { color: var(--text); }
+        /* ─── Form ─── */
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            color: var(--text);
+            font-size: 0.95rem;
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+            resize: vertical;
+            line-height: 1.7;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(108,92,231,0.15);
+        }
+        .form-row {
+            display: flex;
+            gap: 12px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+        .form-group {
+            flex: 1;
+            min-width: 180px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            margin-bottom: 4px;
+        }
+        input[type="text"] {
+            width: 100%;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text);
+            font-size: 0.9rem;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        /* ─── Buttons ─── */
+        .btn-row {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+        }
+        button.btn {
+            padding: 12px 32px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(108,92,231,0.4); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-secondary {
+            background: var(--surface2);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover { border-color: var(--accent); }
+        /* ─── Results ─── */
+        #results { display: none; }
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: var(--surface2);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+            border: 1px solid var(--border);
+        }
+        .stat-card .value {
+            font-size: 1.8rem;
+            font-weight: 800;
+        }
+        .stat-card .label {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+        .level-critical .value { color: var(--red); }
+        .level-high .value { color: var(--orange); }
+        .level-medium .value { color: var(--yellow); }
+        .level-low .value { color: var(--green); }
+        /* ─── Paragraph Cards ─── */
+        .para-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        .para-card .para-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .para-card .para-id {
+            font-weight: 700;
+            color: var(--accent);
+        }
+        .risk-badge {
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .risk-critical { background: rgba(225,112,85,0.2); color: var(--red); }
+        .risk-high { background: rgba(232,119,0,0.2); color: var(--orange); }
+        .risk-medium { background: rgba(253,203,110,0.2); color: var(--yellow); }
+        .risk-low { background: rgba(0,184,148,0.2); color: var(--green); }
+        .para-preview {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            margin-bottom: 8px;
+            font-family: monospace;
+            background: var(--bg);
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+        .dim-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .dim-chip {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: var(--surface);
+            color: var(--text-dim);
+        }
+        .dim-chip.hit { color: var(--orange); border: 1px solid rgba(232,119,0,0.3); }
+        /* ─── Rewrite Output ─── */
+        #rewrite-output {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            white-space: pre-wrap;
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 0.9rem;
+            line-height: 1.7;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        /* ─── Spinner ─── */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        /* ─── Footer ─── */
+        footer {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-dim);
+            font-size: 0.85rem;
+        }
+        footer a { color: var(--accent); text-decoration: none; }
+        /* ─── Collapsible ─── */
+        .collapsible-header {
+            cursor: pointer;
+            user-select: none;
+        }
+        .collapsible-content {
+            display: none;
+            margin-top: 8px;
+        }
+        .collapsible-content.open { display: block; }
+        /* ─── Responsive ─── */
+        @media (max-width: 640px) {
+            header h1 { font-size: 1.5rem; }
+            .stat-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🧹 AI Trace Eraser</h1>
+    <p>学术文本 AI 痕迹检测与改写 · Academic AI-Writing-Risk Detection & Rewriting</p>
+    <div class="badges">
+        <span class="badge">📊 15 Dimensions</span>
+        <span class="badge">✏️ 16 Techniques</span>
+        <span class="badge">🛡️ 10 Quality Gates</span>
+        <span class="badge">🇨🇳🇬🇧 中英双语</span>
+    </div>
+</header>
+
+<main>
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('detect')">🔍 检测分析</button>
+        <button class="tab" onclick="switchTab('rewrite')">✏️ AI改写</button>
+        <button class="tab" onclick="switchTab('about')">📖 说明</button>
+    </div>
+
+    <!-- ─── Detect Tab ─── -->
+    <div id="tab-detect" class="tab-content">
+        <div class="card">
+            <h2>📝 粘贴学术文本</h2>
+            <textarea id="input-text" placeholder="在此粘贴你的学术论文、报告或段落...&#10;&#10;Paste your academic text here..."></textarea>
+            <div class="btn-row">
+                <button class="btn btn-primary" id="analyze-btn" onclick="analyze()">
+                    🔍 检测 AI 痕迹
+                </button>
+                <button class="btn btn-secondary" onclick="document.getElementById('input-text').value=''; document.getElementById('results').style.display='none';">
+                    清空
+                </button>
+            </div>
+        </div>
+
+        <div id="results" class="tab-content-section">
+            <div class="card">
+                <h2>📊 总体评估</h2>
+                <div class="stat-grid" id="stat-grid"></div>
+            </div>
+
+            <div class="card">
+                <h2>📋 段落级分析</h2>
+                <div id="para-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── Rewrite Tab ─── -->
+    <div id="tab-rewrite" class="tab-content" style="display:none;">
+        <div class="card">
+            <h2>⚙️ AI 改写设置</h2>
+            <p style="color: var(--text-dim); font-size: 0.9rem; margin-bottom: 16px;">
+                在下方配置 API（支持 OpenAI / DashScope / 任何兼容 API）。你的密钥仅用于本次请求，不会被存储。
+            </p>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="text" id="api-key" placeholder="sk-... / ghp_...">
+                </div>
+                <div class="form-group">
+                    <label>API Base URL（可选）</label>
+                    <input type="text" id="api-base" placeholder="https://api.openai.com/v1">
+                </div>
+                <div class="form-group">
+                    <label>Model</label>
+                    <input type="text" id="model-name" placeholder="gpt-4o / qwen-max">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>外部检测器分数（可选）</label>
+                    <input type="text" id="detector-score" placeholder="如: Turnitin 48% / 知网AIGC 49.9%">
+                </div>
+            </div>
+            <p style="color: var(--text-dim); font-size: 0.85rem; margin-top: 8px;">
+                💡 不填 API Key 也可以使用「检测分析」功能（本地检测），AI改写需要配置 API。
+            </p>
+            <div class="btn-row">
+                <button class="btn btn-primary" id="rewrite-btn" onclick="rewrite()">
+                    ✏️ 开始 AI 改写
+                </button>
+            </div>
+        </div>
+
+        <div class="card" id="rewrite-result-card" style="display:none;">
+            <h2>✅ 改写结果</h2>
+            <div id="rewrite-output"></div>
+        </div>
+    </div>
+
+    <!-- ─── About Tab ─── -->
+    <div id="tab-about" class="tab-content" style="display:none;">
+        <div class="card">
+            <h2>📖 关于 AI Trace Eraser</h2>
+            <h3 style="color: var(--accent); margin: 16px 0 8px;">三条铁律 / Three Iron Rules</h3>
+            <ul style="list-style: none; padding-left: 0;">
+                <li>1. 🚫 禁止整段重写 — 每句必须可追溯到原文</li>
+                <li>2. 🚫 禁止编造 — 不编造引语、数据、引用</li>
+                <li>3. 🚫 禁止缩字 — 改写后字数 ≥ 原文</li>
+            </ul>
+            <h3 style="color: var(--accent); margin: 16px 0 8px;">15 个检测维度 / 15 Detection Dimensions</h3>
+            <table style="width: 100%; font-size: 0.85rem; border-collapse: collapse;">
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <th style="text-align: left; padding: 6px;">维度</th><th style="text-align: left;">名称</th><th>分值</th>
+                </tr>
+                <tr><td style="padding: 4px 6px;">D1</td><td>Repetitive Sentence Starters / 重复句首</td><td>3.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D2</td><td>Formulaic Transitions / 套路过渡词</td><td>3.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D3</td><td>Over-Smooth Logical Flow / 过度平滑逻辑</td><td>3.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D4</td><td>Uniform Sentence Rhythm / 句式节奏单一</td><td>2.5</td></tr>
+                <tr><td style="padding: 4px 6px;">D5</td><td>Generic Academic Phrasing / 空泛学术用语</td><td>3.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D6</td><td>Overused Hedging / 过度对冲</td><td>2.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D7</td><td>Conclusion-Style Generalizations / 泛泛结论</td><td>2.5</td></tr>
+                <tr><td style="padding: 4px 6px;">D8</td><td>Passive Voice Clusters / 被动语态堆叠</td><td>2.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D9</td><td>Abstract-to-Concrete Imbalance / 抽象过多</td><td>2.5</td></tr>
+                <tr><td style="padding: 4px 6px;">D10</td><td>Citation Pattern Regularity / 引用格式单一</td><td>2.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D11</td><td>Lexical Flatness / 词汇贫乏</td><td>2.5</td></tr>
+                <tr><td style="padding: 4px 6px;">D12</td><td>Paragraph Template Structure / 段落模板化</td><td>4.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D13</td><td>Cross-Paragraph Repetition / 跨段重复</td><td>4.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D14</td><td>AI-Like Smoothness / AI腔</td><td>3.0</td></tr>
+                <tr><td style="padding: 4px 6px;">D15</td><td>Section Template Dependency / 章节模板依赖</td><td>3.0</td></tr>
+            </table>
+            <h3 style="color: var(--accent); margin: 16px 0 8px;">伦理声明 / Ethics</h3>
+            <p style="font-size: 0.9rem; color: var(--text-dim);">
+                这是一个编辑辅助工具，用于提升文本清晰度和恢复作者声音。它不会生成研究发现、编造数据或修改引用。使用时请遵守你所在机构的信息披露政策。
+            </p>
+            <p style="margin-top: 12px;">
+                <a href="https://github.com/jerry1-code/ai-trace-eraser" target="_blank">🔗 GitHub 仓库</a>
+            </p>
+        </div>
+    </div>
+</main>
+
+<footer>
+    <p>AI Trace Eraser v1.0.0 · <a href="https://github.com/jerry1-code/ai-trace-eraser">GitHub</a> · MIT License</p>
+</footer>
+
+<script>
+function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+    event.target.classList.add('active');
+    document.getElementById('tab-' + tab).style.display = 'block';
+}
+
+async function analyze() {
+    const text = document.getElementById('input-text').value;
+    if (!text.trim()) { alert('请先粘贴文本'); return; }
+
+    const btn = document.getElementById('analyze-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 分析中...';
+
+    try {
+        const resp = await fetch('/api/analyze', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text})
+        });
+        const data = await resp.json();
+        if (data.error) { alert(data.error); return; }
+        renderResults(data);
+    } catch (e) {
+        alert('请求失败: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🔍 检测 AI 痕迹';
+    }
+}
+
+function renderResults(data) {
+    document.getElementById('results').style.display = 'block';
+
+    const levelNames = {critical: '严重', high: '高风险', medium: '中等', low: '低风险'};
+    const levelClass = data.overall_level;
+
+    document.getElementById('stat-grid').innerHTML = `
+        <div class="stat-card level-${levelClass}">
+            <div class="value">${data.scope_risk_index}%</div>
+            <div class="label">总体风险指数 / Risk Index</div>
+        </div>
+        <div class="stat-card level-${levelClass}">
+            <div class="value">${levelNames[data.overall_level]}</div>
+            <div class="label">风险等级 / Risk Level</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${data.total_paragraphs}</div>
+            <div class="label">段落数 / Paragraphs</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${data.total_words}</div>
+            <div class="label">总词数 / Words</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${data.average_risk}%</div>
+            <div class="label">平均风险 / Avg Risk</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${data.high_risk_share}%</div>
+            <div class="label">高风险占比 / High Share</div>
+        </div>
+    `;
+
+    const paraHtml = data.paragraphs.map(p => {
+        const dims = Object.entries(p.dimensions).map(([k, v]) => {
+            const hit = v.score >= 2.0 ? 'hit' : '';
+            return `<span class="dim-chip ${hit}">${k}: ${v.score}/${v.max} ${v.name.split(' / ')[0]}</span>`;
+        }).join('');
+        const levelNames = {critical: '严重', high: '高风险', medium: '中等', low: '低风险'};
+        return `
+            <div class="para-card">
+                <div class="para-header">
+                    <span class="para-id">段落 #${p.id}</span>
+                    <span class="risk-badge risk-${p.risk_level}">${levelNames[p.risk_level]} ${p.risk_index}%</span>
+                </div>
+                <div class="para-preview">${p.preview}</div>
+                <div style="font-size: 0.8rem; color: var(--text-dim); margin: 4px 0 8px;">
+                    词数: ${p.word_count} · 强维度: ${p.strong_dimensions} · 总分: ${p.total_score}
+                </div>
+                <div class="dim-list">${dims}</div>
+            </div>
+        `;
+    }).join('');
+    document.getElementById('para-list').innerHTML = paraHtml;
+}
+
+async function rewrite() {
+    const text = document.getElementById('input-text').value;
+    if (!text.trim()) { alert('请先在「检测分析」页粘贴文本'); return; }
+
+    const apiKey = document.getElementById('api-key').value;
+    if (!apiKey) {
+        alert('请填写 API Key（在「AI改写」页配置）\n支持 OpenAI / DashScope 等兼容 API');
+        return;
+    }
+
+    const btn = document.getElementById('rewrite-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 改写中...';
+
+    const payload = {
+        text,
+        api_key: apiKey,
+        api_base: document.getElementById('api-base').value,
+        model: document.getElementById('model-name').value,
+        detector_score: document.getElementById('detector-score').value,
+    };
+
+    try {
+        const resp = await fetch('/api/rewrite', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (data.error) {
+            document.getElementById('rewrite-result-card').style.display = 'block';
+            document.getElementById('rewrite-output').textContent = '❌ 错误: ' + data.error;
+            return;
+        }
+        document.getElementById('rewrite-result-card').style.display = 'block';
+        document.getElementById('rewrite-output').textContent = data.result;
+    } catch (e) {
+        alert('请求失败: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '✏️ 开始 AI 改写';
+    }
+}
+</script>
+</body>
+</html>
