@@ -343,6 +343,9 @@
             <div class="card">
                 <h2>📊 总体评估</h2>
                 <div class="stat-grid" id="stat-grid"></div>
+                <p style="font-size: 0.78rem; color: var(--text-dim); margin-top: 8px; line-height: 1.5;">
+                    ⚠️ 本地检测仅覆盖 6/15 个维度（D1/D2/D4/D5/D8/D14），风险指数口径与完整 15 维（满分 42）不同，仅供定位参考，不能替代外部检测器复测。
+                </p>
             </div>
 
             <div class="card">
@@ -379,8 +382,8 @@
                     <input type="text" id="detector-score" placeholder="如: Turnitin 48% / 知网AIGC 49.9%">
                 </div>
             </div>
-            <p style="color: var(--text-dim); font-size: 0.85rem; margin-top: 8px;">
-                💡 不填 API Key 也可以使用「检测分析」功能（本地检测），AI改写需要配置 API。
+            <p id="api-hint" style="color: var(--text-dim); font-size: 0.85rem; margin-top: 8px;">
+                💡 不填 API Key 也可以使用「检测分析」功能（本地检测）。AI 改写可填自己的 Key，或在服务端已配置时直接改写。
             </p>
             <div class="btn-row">
                 <button class="btn btn-primary" id="rewrite-btn" onclick="rewrite()">
@@ -442,6 +445,15 @@
 </footer>
 
 <script>
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function switchTab(tab) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
@@ -519,7 +531,7 @@ function renderResults(data) {
                     <span class="para-id">段落 #${p.id}</span>
                     <span class="risk-badge risk-${p.risk_level}">${levelNames[p.risk_level]} ${p.risk_index}%</span>
                 </div>
-                <div class="para-preview">${p.preview}</div>
+                <div class="para-preview">${escapeHtml(p.preview)}</div>
                 <div style="font-size: 0.8rem; color: var(--text-dim); margin: 4px 0 8px;">
                     词数: ${p.word_count} · 强维度: ${p.strong_dimensions} · 总分: ${p.total_score}
                 </div>
@@ -534,11 +546,9 @@ async function rewrite() {
     const text = document.getElementById('input-text').value;
     if (!text.trim()) { alert('请先在「检测分析」页粘贴文本'); return; }
 
+    // API key is optional: if the server has one configured, we can rewrite
+    // without supplying our own. The backend decides which to use.
     const apiKey = document.getElementById('api-key').value;
-    if (!apiKey) {
-        alert('请填写 API Key（在「AI改写」页配置）\n支持 OpenAI / DashScope 等兼容 API');
-        return;
-    }
 
     const btn = document.getElementById('rewrite-btn');
     btn.disabled = true;
@@ -573,6 +583,15 @@ async function rewrite() {
         btn.innerHTML = '✏️ 开始 AI 改写';
     }
 }
+
+// On load, check whether the server already has an API key configured,
+// so users know they can rewrite without supplying their own key.
+fetch('/health').then(r => r.json()).then(h => {
+    const hint = document.getElementById('api-hint');
+    if (hint && h.api_configured) {
+        hint.textContent = '✅ 服务端已配置 API，可直接点击改写（使用服务端密钥，无需自填）。也可填自己的 Key 覆盖。';
+    }
+}).catch(() => {});
 </script>
 </body>
 </html>

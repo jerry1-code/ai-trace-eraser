@@ -33,18 +33,52 @@ SKILL_CONTENT = load_skill()
 
 # ─── Local Detection (without LLM) ─────────────────────────────────────────────
 def split_paragraphs(text):
-    """Split text into paragraphs."""
+    """Split text into paragraphs. Prefer blank-line separation; if none is
+    found (text pasted from some sources uses single newlines between
+    paragraphs), fall back to single-newline splitting so the whole document
+    is not collapsed into one paragraph."""
     paragraphs = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
+    if len(paragraphs) <= 1:
+        lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
+        if len(lines) > 1:
+            paragraphs = lines
     return paragraphs
+
+def _split_sentences(text):
+    """Split text into sentences, handling both English (.!?) and Chinese
+    （。！？） sentence-ending punctuation. The old regex only matched English
+    punctuation, so a Chinese paragraph was treated as one giant sentence."""
+    parts = re.split(r'(?<=[.!?。！？])[ \t]*', text)
+    return [s.strip() for s in parts if s.strip()]
+
+def _sentence_length(sentence):
+    """Measure sentence length. For Chinese-containing sentences, count
+    Chinese characters plus English word tokens; otherwise count whitespace-
+    separated words. Using len(s.split()) on Chinese yields 1 for every
+    sentence (no spaces), which falsely signals extreme uniform rhythm."""
+    if re.search(r'[\u4e00-\u9fff]', sentence):
+        chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', sentence))
+        english_words = len(re.findall(r'[a-zA-Z]+', sentence))
+        return chinese_chars + english_words
+    return len(sentence.split())
 
 def detect_repetitive_starters(paragraph):
     """D1: Detect repetitive sentence starters."""
-    sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+    sentences = _split_sentences(paragraph)
     starters = []
     for s in sentences:
-        words = s.strip().split()
-        if words:
-            starters.append(words[0].lower())
+        s = s.strip()
+        if not s:
+            continue
+        # English: first word. Chinese: first 2 chars as a starter signature
+        # (Chinese has no spaces, so word-splitting collapses the whole
+        # sentence into a single token and the starter is meaningless).
+        m = re.match(r'[a-zA-Z]+', s)
+        if m:
+            starters.append(m.group().lower())
+        else:
+            ch = re.findall(r'[\u4e00-\u9fff]', s)
+            starters.append(''.join(ch[:2]))
     # Count repeats
     from collections import Counter
     counts = Counter(starters)
@@ -102,10 +136,10 @@ def detect_generic_phrasing(paragraph):
 
 def detect_uniform_rhythm(paragraph):
     """D4: Detect uniform sentence length."""
-    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', paragraph) if s.strip()]
+    sentences = _split_sentences(paragraph)
     if len(sentences) < 3:
         return 0.0, 0
-    lengths = [len(s.split()) for s in sentences]
+    lengths = [_sentence_length(s) for s in sentences]
     avg = sum(lengths) / len(lengths)
     if avg == 0:
         return 0.0, 0
@@ -141,12 +175,14 @@ def detect_ai_phrases(paragraph):
     return 0.0, 0
 
 def detect_passive_clusters(paragraph):
-    """D8: Detect passive voice clusters."""
+    """D8: Detect passive voice clusters. Only matches auxiliary-be +
+    past-participle forms. The old `the \\w+ion of` / `the \\w+tion of`
+    nominalization patterns were removed: they matched far too broadly
+    ('the version of', 'the section of', 'the collection of') and inflated
+    false positives in academic text."""
     passive_patterns = [
         r'\b(?:was|were|is|are|been|being|be)\s+\w+ed\b',
         r'\b(?:was|were|is|are|been|being)\s+\w+en\b',
-        r'the\s+\w+ion\s+of',
-        r'the\s+\w+tion\s+of',
     ]
     count = 0
     for pattern in passive_patterns:
@@ -235,7 +271,11 @@ def analyze_text(text):
     high_share = sum(1 for r in results if r["risk_index"] >= 40) / len(results) * 100 if results else 0
     medium_share = sum(1 for r in results if r["risk_index"] >= 25) / len(results) * 100 if results else 0
 
-    scope_risk = (0.45 * avg_risk + 0.25 * high_share + 0.15 * medium_share + 0.15 * 20)
+    # section_repetition_score: placeholder constant. Cross-paragraph
+    # structural repetition is not yet computed locally; kept as a named
+    # constant instead of a magic number so the formula stays auditable.
+    section_repetition_score = 20
+    scope_risk = (0.45 * avg_risk + 0.25 * high_share + 0.15 * medium_share + 0.15 * section_repetition_score)
     scope_risk = min(scope_risk, 100)
 
     if scope_risk >= 40:
@@ -278,9 +318,10 @@ def llm_rewrite(text, detector_score="", api_key=None, api_base=None, model=None
     Apply the three iron rules: no whole-paragraph regeneration, no fabrication,
     no word-count reduction. Use minimal edits only.
 
-    Here is the SKILL.md content:
+    Here is the full SKILL.md content — the quality gates (A–J) and output
+    structure in the later phases are essential, do not ignore them:
 
-    {SKILL_CONTENT[:15000]}
+    {SKILL_CONTENT}
     """)
 
     user_prompt = textwrap.dedent(f"""
@@ -315,6 +356,29 @@ def llm_rewrite(text, detector_score="", api_key=None, api_base=None, model=None
     except Exception as e:
         return None, str(e)
 
+# ─── Request guards (size limit + rate limiting) ─────────────────────────────
+import time as _time
+
+MAX_BODY_BYTES = 200_000  # ~200KB is ample for a chapter of academic text
+_rate_store = {}           # ip -> [timestamps]  (in-memory, per-worker)
+RATE_WINDOW = 60          # seconds
+RATE_MAX = 8              # max /api/rewrite calls per window per IP
+
+@app.before_request
+def _guard_request():
+    """Body size cap + per-IP rate limit. Prevents abuse when deployed as a
+    public service (e.g. being used as a free LLM-API relay)."""
+    if request.content_length and request.content_length > MAX_BODY_BYTES:
+        return jsonify({"error": f"Request body too large (limit {MAX_BODY_BYTES} bytes)."}), 413
+    if request.path == '/api/rewrite':
+        ip = (request.headers.get('X-Forwarded-For', request.remote_addr or '')).split(',')[0].strip()
+        now = _time.time()
+        hits = [t for t in _rate_store.get(ip, []) if now - t < RATE_WINDOW]
+        if len(hits) >= RATE_MAX:
+            return jsonify({"error": "Rate limit exceeded. Please slow down and retry shortly."}), 429
+        hits.append(now)
+        _rate_store[ip] = hits
+
 # ─── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
@@ -334,18 +398,37 @@ def api_rewrite():
     data = request.get_json()
     text = data.get("text", "")
     detector_score = data.get("detector_score", "")
-    api_key = data.get("api_key", "")
-    api_base = data.get("api_base", "")
-    model = data.get("model", "")
+    user_api_key = data.get("api_key", "") or ""
+    user_api_base = data.get("api_base", "") or ""
+    user_model = data.get("model", "") or ""
 
     if not text.strip():
         return jsonify({"error": "No text provided"}), 400
 
+    # Resolve credentials. Two modes:
+    # 1) User supplies their own key -> user controls base/model too.
+    # 2) Server has a key configured -> base/model forced to server values;
+    #    a client-supplied api_base is IGNORED to prevent SSRF / server-key
+    #    exfiltration to an attacker-controlled endpoint.
+    if user_api_key:
+        eff_key = user_api_key
+        eff_base = user_api_base or API_BASE
+        eff_model = user_model or MODEL
+    elif API_KEY:
+        eff_key = API_KEY
+        eff_base = API_BASE
+        eff_model = MODEL
+    else:
+        return jsonify({
+            "error": "No API key available. Provide your own API key in the form, "
+                     "or ask the operator to set OPENAI_API_KEY / DASHSCOPE_API_KEY on the server."
+        }), 500
+
     result, error = llm_rewrite(
         text, detector_score,
-        api_key=api_key or None,
-        api_base=api_base or None,
-        model=model or None,
+        api_key=eff_key,
+        api_base=eff_base,
+        model=eff_model,
     )
     if error:
         return jsonify({"error": error}), 500
@@ -361,4 +444,7 @@ def health():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    # Debug off by default in production. Enable explicitly via
+    # AI_TRACE_DEBUG=1 for local development only.
+    debug = os.environ.get("AI_TRACE_DEBUG", "0") == "1"
+    app.run(host="0.0.0.0", port=port, debug=debug)
